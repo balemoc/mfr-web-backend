@@ -1,0 +1,76 @@
+{
+  "name": "mfr-web-backend",
+  "version": "1.0.0",
+  "main": "src/index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://mbael@github.com/mbael/mfr-web-backend.git"
+  },
+  "author": "Balazs Mocsai <me@bael.me>",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://mbael@github.com/mbael/mfr-web-backend/issues"
+  },
+  "homepage": "https://mbael@github.com/mbael/mfr-web-backend#readme",
+  "devDependencies": {
+    "babel-cli": "^6.14.0",
+    "babel-eslint": "^6.1.2",
+    "babel-preset-node5": "^11.1.0",
+    "code": "^3.0.2",
+    "eslint": "^3.3.1",
+    "eslint-config-airbnb": "^10.0.1",
+    "eslint-plugin-babel": "^3.3.0",
+    "eslint-plugin-import": "^1.14.0",
+    "eslint-plugin-jsx-a11y": "^2.1.0",
+    "eslint-plugin-react": "^6.1.2",
+    "gulp": "^3.9.1",
+    "gulp-babel": "^6.1.2",
+    "gulp-concat": "^2.6.0",
+    "gulp-eslint": "^3.0.1",
+    "gulp-lab": "^1.0.6",
+    "gulp-nodemon": "^2.1.0",
+    "gulp-sourcemaps": "^1.6.0",
+    "gulp-uglify": "^2.0.0",
+    "lab": "^11.0.1",
+    "pump": "^1.0.1",
+    "uglify-js": "^2.7.3",
+    "uglify-js-harmony": "^2.6.2"
+  },
+  "babel": {
+    "presets": [
+      "node5"
+    ]
+  },
+  "eslintConfig": {
+    "env": {
+      "es6": true,
+      "node": true
+    },
+    "parser": "babel-eslint",
+    "rules": {
+      "babel/generator-star-spacing": 1,
+      "babel/new-cap": 1,
+      "babel/array-bracket-spacing": 1,
+      "babel/object-curly-spacing": 1,
+      "babel/object-shorthand": 1,
+      "babel/arrow-parens": 1,
+      "babel/no-await-in-loop": 1,
+      "babel/flow-object-type": 1,
+      "indent": [
+        "error",
+        4
+      ]
+    },
+    "plugins": [
+      "babel"
+    ],
+    "extends": [
+      "airbnb"
+    ]
+  },
+  "dependencies": {
+    "hapi": "^14.2.0",
+    "inert": "^4.0.2",
+    "mongorito": "^2.1.2"
+  }
+}
