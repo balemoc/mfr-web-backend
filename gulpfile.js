@@ -40,6 +40,9 @@ const nodemonConfig = {
     watch: sourceFolder,
     tasks: ['transpile'],
     verbose: true,
+    env: {
+        NODE_ENV: 'development',
+    },
 };
 
 /*
@@ -51,7 +54,6 @@ gulp.task('transpile', () =>
     gulp.src(sourceGlob)
         .pipe(sourcemaps.init())
         .pipe(babel(babelConfig))
-        .pipe(concat(appEntry))
         .pipe(sourcemaps.write('.'))
         .pipe(gulp.dest(distFolder))
 );
