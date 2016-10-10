@@ -1,8 +1,8 @@
-import Mongorito from 'mongorito';
-import bcrypt from 'bcrypt';
-import joi from 'joi';
+import {
+  Model,
+} from 'mongorito';
 
-class Accesstoken extends Mongorito.Model {
+class Accesstoken extends Model {
   collection() {
     return 'access_tokens';
   }

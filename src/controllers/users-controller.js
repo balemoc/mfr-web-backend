@@ -1,210 +1,15 @@
-import User from '~/models/user-model';
-import AccessToken from '~/models/access-token-model';
-import jwt from 'jsonwebtoken';
 import _ from 'lodash';
-import NodeMailer from 'nodemailer';
+import moment from 'moment';
+
+import User from '~/models/user-model';
 
 const UsersController = {
-  resetPassword(request, reply) {
-    const email = request.payload.email;
-    const config = request.server.app.config;
-
-    function checkUserByEmail(users) {
-      return new Promise((resolve, reject) =>
-        (users[0] ? resolve(users[0]) : reject({
-          code: 0,
-          message: email,
-        })));
-    }
-
-    // generate a passwordtoken and save aswell
-    function generateAndSavePasswordToken(user) {
-      return new Promise((resolve, reject) => {
-        // store email in token to make sure token is unique
-        const passwordToken = jwt.sign({
-          user_id: user.get('_id'),
-          email: user.get('email'),
-        }, config.mixed.security.jwt_key, config.mixed.security.pt_jwt_options);
-        // from environment config
-
-        user.set('password_token', passwordToken);
-
-        user
-          .save()
-          .then((userWithToken) => resolve(userWithToken))
-          .catch((error) => reject({
-            code: 1,
-            message: error,
-          }));
-      });
-    }
-
-    function sendEmail(user) {
-      return new Promise((resolve, reject) => {
-        const mailOptions = {
-          from: '"Mór Fit Run" <info@morfitrun.com>', // sender address
-          to: `${user.get('email')}`, // list of receivers
-          subject: `Recover your account, ${user.get('first_name')}!`, // Subject line
-          text: `Your password recovery token is: ${user.get('password_token')}`, // plaintext body
-        };
-
-        const transport = NodeMailer.createTransport(config.email);
-
-        // send email and if error reject
-        transport.sendMail(mailOptions, (error) => {
-          if (error) {
-            reject({
-              error: 2,
-              message: error,
-            });
-          } else {
-            resolve();
-          }
-        });
-      });
-    }
-
-    // sending back a message
-    function successHandler() {
-      reply();
-    }
-
-    // checking if error's coming from exception or data's side
-    function errorHandler(error) {
-      switch (error.code) {
-      case 0:
-        reply.notFound();
-        break;
-      default:
-        reply.badImplementation(error);
-      }
-    }
-
-    User
-      .find({
-        email,
-      })
-      // send back a single user (array comes from find) and reject if invalid email
-      .then(checkUserByEmail)
-      .then(generateAndSavePasswordToken) // generate save token
-      .then(sendEmail)
-      .then(successHandler) // if everything went well
-      .catch(errorHandler); // if any error occured
-  },
-
-  recoverPassword(request, reply) {
-    // new password
-    const password = request.payload.password;
-    // decoded password token
-    const userId = request.auth.credentials.user_id;
-
-    // check user by id
-    function checkUserById(users) {
-      return new Promise((resolve, reject) =>
-        (users[0] ? resolve(users[0]) : reject({
-          code: 0,
-          message: userId,
-        })));
-    }
-
-    function setNewPassword(user) {
-      return new Promise((resolve, reject) => {
-        User.helpers
-          .generatePasswordHash(password)
-          .then((hash) => {
-            // store hashed password
-            user.set('password', hash);
-
-            user
-              .save()
-              .then((userWithHash) => resolve(userWithHash))
-              .catch((error) => reject({
-                code: 1,
-                message: error,
-              }));
-          })
-          .catch((error) => reject({
-            code: 1,
-            message: error,
-          }));
-      });
-    }
-
-    // remove passwordtoken from user
-    function removePasswordToken(user) {
-      return new Promise((resolve, reject) => {
-        // remove pw token - "used"
-        user.set('password_token', '');
-
-        user
-          .save()
-          .then((userWithoutToken) => resolve(userWithoutToken))
-          .catch((error) => reject({
-            code: 2,
-            message: error,
-          }));
-      });
-    }
-
-    // remove all accesstokens based on userid
-    function removeAccessTokens(user) {
-      return new Promise((resolve, reject) => {
-        // clear accesstokens collection
-        AccessToken
-          .remove({
-            user_id: user.get('_id'),
-          })
-          .then(() => resolve(user))
-          .catch((error) => reject({
-            code: 3,
-            message: error,
-          }));
-
-        // remove from user entity aswell
-        user.set('access_tokens', []); // set empty array - collection
-
-        user
-          .save()
-          .then((userWithoutToken) => resolve(userWithoutToken))
-          .catch((error) => reject({
-            code: 3,
-            message: error,
-          }));
-      });
-    }
-
-    // sending back a message if flow has succeeded
-    function successHandler() {
-      reply();
-    }
-
-    // checking if error's coming from exception or data's side
-    function errorHandler(error) {
-      switch (error.code) {
-      case 0:
-        reply.notFound('User is missing');
-        break;
-      default:
-        reply.badImplementation(error);
-      }
-    }
-
-    User
-      .find({
-        _id: userId,
-      })
-      .then(checkUserById)
-      .then(setNewPassword) // set new pw
-      .then(removePasswordToken) // remove password token
-      .then(removeAccessTokens) // remove access tokens
-      .then(successHandler) // reply success
-      .catch(errorHandler); // fail
-  },
-
-  createUser(request, reply) {
+  create(request, reply) {
     // parsed new user data
     const newUser = request.payload;
-    newUser.birth_date = new Date(newUser.birth_date); // convert json date to js date
+    newUser.birth_date = moment(newUser.birth_date).toDate(); // convert json date to js date
+    newUser.access_tokens = [];
+    newUser.password_tokens = '';
 
     function checkUserByEmail(users) {
       return new Promise((resolve, reject) =>
@@ -280,8 +85,8 @@ const UsersController = {
       .catch(errorHandler); // if fail
   },
 
-  getUserByID(request, reply) {
-    const userID = request.params.id;
+  getByID(request, reply) {
+    const userId = request.params.userId;
 
     function checkUserByEmail(users) {
       return new Promise((resolve, reject) =>
@@ -317,12 +122,47 @@ const UsersController = {
 
     User
       .find({
-        _id: userID,
+        _id: userId,
       })
       // check if there is no user registered with such email
       .then(checkUserByEmail)
       .then(successHandler)
       .catch(errorHandler);
+  },
+
+  get(request, reply) {
+    // filters
+    const {
+      // age,
+      gender,
+    } = request.query;
+    // query obj
+    const query = {};
+
+    // TODO AGE
+    // buiilding query obj
+    if (gender) query.gender = gender;
+
+    User
+      .find(query)
+      .then((users) => {
+        // strip properties to reply
+        const stripedUsers = [];
+
+        _.forEach(users, (obj) => {
+          stripedUsers.push({
+            user_id: obj.get('_id'),
+            first_name: obj.get('first_name'),
+            last_name: obj.get('last_name'),
+            birth_date: obj.get('birth_date'),
+            gender: obj.get('gender'),
+            avatar: obj.get('avatar'),
+          });
+        });
+
+        return reply(stripedUsers);
+      })
+      .catch((error) => reply(error));
   },
 };
 

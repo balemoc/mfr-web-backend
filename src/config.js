@@ -17,8 +17,8 @@ const Config = {
         pass: 'd50584a8070ef0',
       },
     },
-    uploads: {
-      folder: 'uploads',
+    folders: {
+      uploads: 'uploads',
       client: 'client',
     },
   },

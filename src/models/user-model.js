@@ -1,10 +1,9 @@
-import Mongorito from 'mongorito';
+import {
+  Model,
+} from 'mongorito';
 import bcrypt from 'bcrypt';
-import moment from 'moment';
 
-const actualSchemaVersion = 1;
-
-class User extends Mongorito.Model {
+class User extends Model {
   collection() {
     return 'users';
   }
@@ -12,31 +11,11 @@ class User extends Mongorito.Model {
     errors
    */
 
-  configure() {
+  static configure() {
     // schema upgrade hook
     // this.before('update', 'upgradeSchema');
     // update last_activity field
-    //this.before('save', 'lastActivity');
-  }
-
-  // set last activity
-  lastActivity() {
-    return new Promise((resolve) => {
-      const now = moment().format().toDate();
-
-      this.set('last_activity', now);
-      resolve();
-    });
-  }
-
-  // check if queried schema is older then actual then follow upgrade procedure
-  async upgradeSchema(next) {
-    const user = this;
-
-    if (user.get('_schema_version') < actualSchemaVersion) {
-      User.helpers.upgradeSchema(user.get('_schema_version'), actualSchemaVersion);
-    }
-    await next;
+    // this.before('save', 'lastActivity');
   }
 }
 
@@ -60,10 +39,6 @@ User.helpers = {
         }
       });
     });
-  },
-
-  upgradeLogics: (fromVersion, toVersion) => {
-    return true;
   },
 
   generatePasswordHash: (password) => {

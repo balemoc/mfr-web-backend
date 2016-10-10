@@ -11,9 +11,10 @@ import BoomDecorator from 'hapi-boom-decorators';
 import Jwt from 'hapi-auth-jwt2';
 import Good from 'good';
 import _ from 'lodash';
+import Promise from 'bluebird';
+
 import Config from '~/config';
 import * as Routes from '~/routes/index';
-
 import AccessToken from '~/models/access-token-model';
 import User from '~/models/user-model';
 
@@ -156,88 +157,36 @@ server.auth.strategy('password_token', 'jwt', {
 server.auth.strategy('access_token', 'jwt', {
   key: server.app.config.mixed.security.jwt_key,
   validateFunc: (decodedToken, request, callback) => {
+    // params
     const encodedToken = request.auth.token;
     const userId = decodedToken.user_id;
-    const userEmail = decodedToken.email;
 
-    const getUserData = new Promise((resolve, reject) => {
+    const checkWithUser = new Promise((resolve, reject) => {
       User
-        .find({
+        .populate('access_tokens', AccessToken)
+        .findOne({
           _id: userId,
         })
-        .then((users) => {
-          console.log(users);
-          resolve(users);
+        .then((user) => {
+          const tokens = user.get('access_tokens');
+
+          // check if user has such access token
+          const matchedToken = _.find(tokens, (token) => token.get('token') === encodedToken);
+
+          // match
+          if (matchedToken) {
+            return resolve();
+          }
+
+          // not found
+          return reject();
         })
-        .catch((err) => {
-          reject(err);
-        })
+        .catch((error) => reject(error));
     });
 
-    //console.log(decodedToken);
-   // console.log(encodedToken);
-
-    Promise
-      .all([getUserData])
-      .then((results) => {
-        console.log(results);
-      })
-      .catch((error) => {
-        console.log(error);
-      });
-
-    callback(null, true);
-
-    /*
-    // check if accesstoken in db
-    const getAccessToken =
-      AccessToken
-        .find({
-          token: encodedToken,
-        })
-        // found token
-        .then((tokens) => new Promise((resolve, reject) =>
-          (tokens[0] ? resolve() : reject({
-            code: 0,
-            message: encodedToken,
-          })))
-        )
-        .catch();
-    */
-
-    /*
-    // check if user in db
-    const getUserData = new Promise((resolve, reject) => {
-      User
-        .find()
-        .then((users) => {})
-        .then((user) => {})
-        .catch();
-    });
-    */
-   
-   /*
-
-    AccessToken
-      .find({
-        token: encodedToken,
-      })
-      // found token
-      .then((tokens) => new Promise((resolve, reject) =>
-        (tokens[0] ? resolve() : reject({
-          code: 0,
-          message: encodedToken,
-        }))))
-      // let them through
-      .then(() => {
-        callback(null, true);
-      })
-      // error
-      .catch(() => {
-        // block
-        callback(null, false);
-      });
-      */
+    checkWithUser
+      .then(() => callback(null, true)) // let it through
+      .catch((error) => callback(error, false)); // error
   },
   verifyOptions: {
     subject: 'access_token',
@@ -256,8 +205,18 @@ server.route({
   path: '/{param*}',
   handler: {
     directory: {
-      path: Path.join(__dirname, 'client'),
-      listing: true,
+      path: Path.join(__dirname, server.app.config.folders.client),
+    },
+  },
+});
+
+// avatars
+server.route({
+  method: 'GET',
+  path: '/uploads/{param*}',
+  handler: {
+    directory: {
+      path: Path.join(__dirname, server.app.config.folders.uploads),
     },
   },
 });
