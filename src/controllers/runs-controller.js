@@ -62,9 +62,27 @@ const RunsController = {
         });
 
       run.save();
+
+      return Promise.resolve(run);
     };
 
-    const successHandler = (run) => reply(run);
+    const saveOnRace = (run) => {
+      Race
+        .findOne({
+          _id: raceId,
+        })
+        .then((race) => {
+          const runs = race.get('runs');
+
+          runs.push(run.get('_id'));
+
+          race.set('runs', runs);
+
+          race.save();
+        });
+    };
+
+    const successHandler = () => reply();
     const errorHandler = (error) => {
       switch (error.code) {
       case 0:
@@ -81,6 +99,7 @@ const RunsController = {
       })
       .then(checkRace)
       .then(createAndSaveRun)
+      .then(saveOnRace)
       .then(successHandler)
       .catch(errorHandler);
   },

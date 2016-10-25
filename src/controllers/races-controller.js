@@ -9,6 +9,7 @@ import Race from '~/models/race-model';
 const RacesController = {
   get(request, reply) {
     Race
+      .populate('runs', Run)
       .exclude(['created_at', 'updated_at'])
       .find()
       .then((races) => reply(races))
@@ -23,6 +24,7 @@ const RacesController = {
 
     newRace.created_by = new ObjectId(user_id);
     newRace.runs = [];
+    newRace.logo = '';
 
     const race = new Race(newRace);
 
@@ -108,7 +110,7 @@ const RacesController = {
       .findOne({
         _id: raceId,
       })
-      .then((race) => reply(race))
+      .then((race) => reply(race.get('runs')))
       .catch((error) => reply(error));
   },
 

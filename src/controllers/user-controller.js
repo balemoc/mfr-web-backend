@@ -148,12 +148,16 @@ const UserController = {
     // generate a passwordtoken and save aswell
     function generateAndSavePasswordToken(user) {
       return new Promise((resolve, reject) => {
+        /* legacy
         // store email in token to make sure token is unique
         const passwordToken = jwt.sign({
           user_id: user.get('_id'),
           email: user.get('email'),
         }, config.mixed.security.jwt_key, config.mixed.security.pt_jwt_options);
         // from environment config
+        */
+        const chance = new Chance();
+        const passwordToken = chance.hash();
 
         user.set('password_token', passwordToken);
 
@@ -171,7 +175,7 @@ const UserController = {
       return new Promise((resolve, reject) => {
         const mailOptions = {
           from: '"Mór Fit Run" <info@morfitrun.com>', // sender address
-          to: `${user.get('email')}`, // list of receivers
+          to: `${user.get('email')}`, // list of receiver
           subject: `Recover your account, ${user.get('first_name')}!`, // Subject line
           text: `Your password recovery token is: ${user.get('password_token')}`, // plaintext body
         };
@@ -222,19 +226,21 @@ const UserController = {
 
   // TODO delete access tokens
   recoverPassword(request, reply) {
-    // new password
-    const password = request.payload.password;
-    // decoded password token
-    const userId = request.auth.credentials.user_id;
+    // parameters
+    const {
+      password,
+      passwordToken
+    } = request.payload;
 
-    // check user by id
-    function checkUserById(users) {
-      return new Promise((resolve, reject) =>
-        (users[0] ? resolve(users[0]) : reject({
+    // check if found user
+    const checkUser = (user) => {
+      if (!user) {
+        return Promise.reject({
           code: 0,
-          message: userId,
-        })));
-    }
+        });
+      }
+      return Promise.resolve(user);
+    };
 
     function setNewPassword(user) {
       return new Promise((resolve, reject) => {
@@ -311,7 +317,7 @@ const UserController = {
     function errorHandler(error) {
       switch (error.code) {
       case 0:
-        reply.notFound('User is missing');
+        reply.notFound();
         break;
       default:
         reply.badImplementation(error);
@@ -319,10 +325,10 @@ const UserController = {
     }
 
     User
-      .find({
-        _id: userId,
+      .findOne({
+        password_token: passwordToken,
       })
-      .then(checkUserById)
+      .then(checkUser)
       .then(setNewPassword) // set new pw
       .then(removePasswordToken) // remove password token
       .then(removeAccessTokens) // remove access tokens

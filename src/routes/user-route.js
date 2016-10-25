@@ -36,11 +36,10 @@ const userRoute = [
     method: 'POST',
     handler: UserController.recoverPassword,
     config: {
-      auth: 'password_token',
       validate: {
         payload: joi.object().keys({
-          email: joi.string().required(),
-          password: joi.string().required().min(4),
+          password: joi.string().required(), // TODO LENGTH
+          passwordToken: joi.string().required(),
         }),
       },
     },
@@ -108,7 +107,7 @@ const userRoute = [
   {
     // TODO validate image
     path: '/v1/user/avatar',
-    method: 'PATCH',
+    method: 'POST',
     handler: UserController.uploadAvatar,
     config: {
       auth: 'access_token',

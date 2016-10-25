@@ -12,13 +12,6 @@ const usersRoute = [
     config: {
       validate: {
         query: joi.object().keys({
-          // TODO FILTER
-          /*
-          age: joi.number().integer().positive()
-            .less(99)
-            .greater(14)
-            .optional(),
-            */
           gender: joi.string().length(1)
             .valid('female')
             .valid('male')
@@ -42,19 +35,18 @@ const usersRoute = [
           gender: joi.string().required().length(1)
             .valid('male')
             .valid('female'),
-          policy: joi.boolean().valid(true),
         }),
       },
     },
   },
   {
-    path: '/v1/users/{userId}',
+    path: '/v1/users/{user_id}',
     method: 'GET',
-    handler: UsersController.getByID,
+    handler: UsersController.getById,
     config: {
       validate: {
         params: joi.object().keys({
-          userId: joi.objectId().required(),
+          user_id: joi.objectId().required(),
         }),
       },
     },

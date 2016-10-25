@@ -168,6 +168,10 @@ server.auth.strategy('access_token', 'jwt', {
           _id: userId,
         })
         .then((user) => {
+          if (!user) {
+            return reject();
+          }
+
           const tokens = user.get('access_tokens');
 
           // check if user has such access token

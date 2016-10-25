@@ -9,7 +9,9 @@ const UsersController = {
     const newUser = request.payload;
     newUser.birth_date = moment(newUser.birth_date).toDate(); // convert json date to js date
     newUser.access_tokens = [];
-    newUser.password_tokens = '';
+    newUser.password_token = '';
+    newUser.avatar = '';
+    newUser.gender = _.lowerCase(request.payload.gender);
 
     function checkUserByEmail(users) {
       return new Promise((resolve, reject) =>
@@ -65,7 +67,7 @@ const UsersController = {
     function errorHandler(error) {
       switch (error.code) {
       case 0:
-        reply.conflict('User is already registered with this email');
+        reply.conflict();
         break;
       default:
         // it we do not know or exception & log
@@ -85,14 +87,14 @@ const UsersController = {
       .catch(errorHandler); // if fail
   },
 
-  getByID(request, reply) {
-    const userId = request.params.userId;
+  getById(request, reply) {
+    const userId = request.params.user_id;
 
     function checkUserByEmail(users) {
       return new Promise((resolve, reject) =>
         (_.isEmpty(users) ? reject({
           code: 0,
-          message: userID,
+          message: userId,
         }) : resolve(users[0]))); // pass user if otherwise userid if absent
     }
 
@@ -141,7 +143,7 @@ const UsersController = {
 
     // TODO AGE
     // buiilding query obj
-    if (gender) query.gender = gender;
+    if (gender) query.gender = _.lowerCase(gender);
 
     User
       .find(query)
