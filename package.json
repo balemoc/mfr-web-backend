@@ -10,7 +10,7 @@
   "license": "ISC",
   "scripts": {
     "dev": "webpack --watch & nodemon --watch dist dist/app.js",
-    "prod": "webpack",
+    "build": "webpack",
     "doc": "docco src/**/*.js "
   },
   "bugs": {
@@ -31,15 +31,6 @@
     "eslint-plugin-import": "^1.14.0",
     "eslint-plugin-jsx-a11y": "^2.1.0",
     "eslint-plugin-react": "^6.1.2",
-    "gulp": "^3.9.1",
-    "gulp-babel": "^6.1.2",
-    "gulp-concat": "^2.6.0",
-    "gulp-eslint": "^3.0.1",
-    "gulp-lab": "^1.0.6",
-    "gulp-nodemon": "^2.1.0",
-    "gulp-sourcemaps": "^1.6.0",
-    "gulp-uglify": "^2.0.0",
-    "hapi-cors-headers": "^1.0.0",
     "lab": "^11.0.1",
     "pump": "^1.0.1",
     "uglify-js": "^2.7.3",
@@ -77,14 +68,14 @@
           ]
         }
       ],
+      "babel/arrow-parens": 0,
       "babel/generator-star-spacing": 1,
       "babel/new-cap": 1,
       "babel/array-bracket-spacing": 1,
-      "babel/object-curly-spacing": 1,
+      "babel/object-curly-spacing": 0,
       "babel/object-shorthand": 1,
-      "babel/arrow-parens": 1,
       "babel/no-await-in-loop": 1,
-      "babel/flow-object-type": 1,
+      "babel/flow-object-type": 0,
       "indent": [
         "error",
         2
@@ -99,6 +90,7 @@
   },
   "dependencies": {
     "async": "^2.0.1",
+    "axios": "^0.15.2",
     "bcrypt": "^0.8.7",
     "blipp": "^2.3.0",
     "bluebird": "^3.4.6",
@@ -120,6 +112,7 @@
     "moment": "^2.14.1",
     "mongorito": "github:vdemedes/mongorito",
     "nodemailer": "^2.5.0",
-    "npm": "^3.10.8"
+    "npm": "^3.10.8",
+    "stream-rotate": "^0.1.0"
   }
 }

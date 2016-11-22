@@ -2,6 +2,7 @@ import {
   Model,
 } from 'mongorito';
 import bcrypt from 'bcrypt';
+import Promise from 'bluebird';
 
 class User extends Model {
   collection() {
@@ -20,28 +21,25 @@ class User extends Model {
 }
 
 User.helpers = {
-  comparePasswords: (passwordToCheck, passwordHash) => {
+  comparePasswords(passwordToCheck, passwordHash) {
     return new Promise((resolve, reject) => {
       // param checking
       if (!passwordToCheck || !passwordHash) {
-        reject('Missing password');
+        reject();
       }
 
       bcrypt.compare(passwordToCheck, passwordHash, (error, result) => {
-        if (error) {
-          reject('Error in hashing');
-        }
-
         if (result) {
           resolve();
-        } else {
-          reject('Wrong password');
+        }
+        if (error || !result) {
+          reject();
         }
       });
     });
   },
 
-  generatePasswordHash: (password) => {
+  generatePasswordHash(password) {
     return new Promise((resolve, reject) => {
       // param checking
       if (!password) {

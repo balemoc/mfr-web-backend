@@ -27,11 +27,11 @@ const usersRoute = [
     config: {
       validate: {
         payload: joi.object().keys({
-          first_name: joi.string().required().min(3),
-          last_name: joi.string().required().min(3),
+          firstName: joi.string().required().min(3),
+          lastName: joi.string().required().min(3),
           email: joi.string().required(),
           password: joi.string().required().min(4),
-          birth_date: joi.date().required().format('D/M/YYYY'),
+          birthDate: joi.date().required(),
           gender: joi.string().required().length(1)
             .valid('male')
             .valid('female'),
@@ -40,13 +40,13 @@ const usersRoute = [
     },
   },
   {
-    path: '/v1/users/{user_id}',
+    path: '/v1/users/{id}',
     method: 'GET',
     handler: UsersController.getById,
     config: {
       validate: {
         params: joi.object().keys({
-          user_id: joi.objectId().required(),
+          id: joi.objectId().required(),
         }),
       },
     },

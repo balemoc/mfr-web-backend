@@ -21,7 +21,7 @@ const racesRoute = [
           title: joi.string().required(),
           description: joi.string().required(),
           risk: joi.string().optional(),
-          limit_of_runners: joi.number().integer().positive(),
+          limitOfRunners: joi.number().integer().positive(),
           distance: joi.number().positive().required(),
           map: joi.object().keys({
             coordinates: joi.object().keys({

@@ -13,7 +13,7 @@ const runsRoute = [
     config: {
       validate: {
         query: {
-          race_id: joi.objectId().optional(),
+          raceId: joi.objectId().optional(),
         },
       },
     },
@@ -25,8 +25,11 @@ const runsRoute = [
     config: {
       auth: 'access_token',
       validate: {
-
-      }
+        payload: {
+          raceId: joi.objectId().required(),
+          date: joi.date().required(),
+        },
+      },
     },
   },
   {
@@ -104,7 +107,7 @@ const runsRoute = [
           runId: joi.objectId().required(),
         },
         payload: {
-          user_id: joi.objectId().required(),
+          userId: joi.objectId().required(),
           time: joi.object().keys({
             minutes: joi.number().integer().positive().required(),
             seconds: joi.number().integer().positive().required(),

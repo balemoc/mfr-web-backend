@@ -26,15 +26,15 @@ const Config = {
 // fulfill
   },
   mixed: {
+    facebook: {
+      appId: '1012799602130499',
+      appSecret: 'f8a7f084be59eaef547172963f75297e',
+      redirectUri: 'http://localhost:8080/facebook',
+    },
     security: {
-      jwt_key: '1234',
-      pt_jwt_options: {
-        // https://github.com/auth0/node-jsonwebtoken#jwtsignpayload-secretorprivatekey-options-callback
-        issuer: 'mfr',
-        subject: 'password_token',
-        expiresIn: '24 days',
-      },
-      at_jwt_options: {
+      jwtKey: '1234',
+      // https://github.com/auth0/node-jsonwebtoken#jwtsignpayload-secretorprivatekey-options-callback
+      jwtOptions: {
         issuer: 'mfr',
         subject: 'access_token',
         expiresIn: '24 days',

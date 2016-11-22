@@ -62,7 +62,19 @@ const goodReporterOptions = {
     }, {
       module: 'good-console',
     }, 'stdout'],
-      // todo file - prod only
+    file: [{
+      module: 'good-squeeze',
+      name: 'Squeeze',
+      args: [{
+        error: '*',
+      }],
+    }, {
+      module: 'good-squeeze',
+      name: 'SafeJson',
+    }, {
+      module: 'good-file',
+      args: [Path.join(__dirname, '/logs.json')],
+    }],
   },
 };
 
@@ -119,17 +131,17 @@ server.register(Jwt, (error) => {
 
 // password token validation
 server.auth.strategy('password_token', 'jwt', {
-  key: server.app.config.mixed.security.jwt_key,
+  key: server.app.config.mixed.security.jwtKey,
   validateFunc: (decodedToken, request, callback) => {
     const encodedToken = request.auth.token;
-    const userId = decodedToken.user_id;
+    const userId = decodedToken.userId;
     const email = decodedToken.email;
 
     User
       // find by user email && stored token
       .find({
         _id: userId,
-        password_token: encodedToken,
+        passwordToken: encodedToken,
         email,
       })
       // found token & user
@@ -155,15 +167,15 @@ server.auth.strategy('password_token', 'jwt', {
 
 // access token validation
 server.auth.strategy('access_token', 'jwt', {
-  key: server.app.config.mixed.security.jwt_key,
+  key: server.app.config.mixed.security.jwtKey,
   validateFunc: (decodedToken, request, callback) => {
     // params
     const encodedToken = request.auth.token;
-    const userId = decodedToken.user_id;
+    const userId = decodedToken.userId;
 
     const checkWithUser = new Promise((resolve, reject) => {
       User
-        .populate('access_tokens', AccessToken)
+        .populate('accessTokens', AccessToken)
         .findOne({
           _id: userId,
         })
@@ -172,10 +184,10 @@ server.auth.strategy('access_token', 'jwt', {
             return reject();
           }
 
-          const tokens = user.get('access_tokens');
+          const tokens = user.get('accessTokens');
 
           // check if user has such access token
-          const matchedToken = _.find(tokens, (token) => token.get('token') === encodedToken);
+          const matchedToken = _.find(tokens, token => token.get('raw') === encodedToken);
 
           // match
           if (matchedToken) {
@@ -207,9 +219,18 @@ server.log(['info'], 'Loading routes & handlers');
 server.route({
   method: 'GET',
   path: '/{param*}',
+  // route all
+  handler: {
+    file: Path.join(__dirname, `${server.app.config.folders.client}/index.html`),
+  },
+});
+
+server.route({
+  method: 'GET',
+  path: '/static/{param*}',
   handler: {
     directory: {
-      path: Path.join(__dirname, server.app.config.folders.client),
+      path: Path.join(__dirname, 'client/static'),
     },
   },
 });

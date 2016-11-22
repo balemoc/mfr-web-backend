@@ -6,203 +6,360 @@ import _ from 'lodash';
 import jwt from 'jsonwebtoken';
 import Promise from 'bluebird';
 import NodeMailer from 'nodemailer';
+import Axios from 'axios';
 import {
   ObjectId,
 } from 'mongorito';
 
 import User from '~/models/user-model';
+import Race from '~/models/race-model';
 import AccessToken from '~/models/access-token-model';
 
 const UserController = {
   login(request, reply) {
-    // set needed variables for flow
+    // params
     const {
-      email, password,
+      email,
+      password,
     } = request.payload;
-    const config = request.server.app.config;
 
-    // check if user is registered with email & send him back
-    function checkUserByEmail(users) {
-      return new Promise((resolve, reject) =>
-        (users[0] ? resolve(users[0]) : reject({
+    // check if user found
+    const checkUser = (user) => {
+      if (!user) {
+        return Promise.reject({
           code: 0,
-          message: email,
-        })));
-    }
-
-    // compare incoming password and reject if not equals
-    function checkPassword(user) {
-      return new Promise((resolve, reject) => {
-        User.helpers
-          // technically if bcrypt would fail then we would send back bad pw
-          // 0.0000000001% chance is very much for that
-          // we do not care
-          .comparePasswords(password, user.get('password'))
-          .then(() => {
-            resolve(user);
-          })
-          .catch((error) => {
-            reject({
-              code: 1,
-              message: error,
-            });
-          });
-      });
-    }
-
-    // generate accesstoken with userdetails and save on both user & accesstoken collections
-    function generateAccessToken(user) {
-      return new Promise((resolve, reject) => {
-        // jwt might fail when config is undefined yet i didn't set up a reject for it
-        // because then the server would fail to start
-        const accessToken = jwt.sign({
-          user_id: user.get('_id'),
-          email: user.get('email'),
-        }, config.mixed.security.jwt_key, config.mixed.security.at_jwt_options);
-
-        // store user details in token
-        const token = new AccessToken({
-          user_id: user.get('_id'),
-          type: 'web',
-          token: accessToken,
         });
+      }
+      return Promise.resolve(user);
+    };
 
-        // save
-        token
-          .save()
-          .then((newToken) => {
-            // initially is undefined - that's why we need init with array
-            const tokens = user.get('access_tokens') || [];
+    // compare passwords
+    const checkPassword = user =>
+      User.helpers
+        .comparePasswords(password, user.get('password'))
+        .then(() => user) // match
+        .catch(() => Promise.reject({ // !match
+          code: 1,
+        }));
 
-            // TODO: remove same type of accesstokens
+    // cleaning purpose TODO
+    const checkIssuedTokens = (user) => {
+      return AccessToken
+        .find({
+          type: 'web',
+        });
+    };
 
-            // get all tokens as array
-            // and after pushing new, save back
-            // hacky due to mongorito does not support modelbased push operations
-            tokens.push(newToken.get('_id'));
-            // save on user
-            user.set('access_tokens', tokens);
+    const generateToken = (user) => {
+      // jwt might fail when config is undefined yet i didn't set up a reject for it
+      // because then the server would fail to start
+      const {
+        jwtKey,
+        jwtOptions,
+      } = request.server.app.config.mixed.security;
 
-            user
-              .save()
-              .then(() => resolve(token)) // pass token for reply
-              .catch((error) => reject({
-                code: 2,
-                data: error,
-              }));
-          });
+      const accessToken = jwt.sign({
+        userId: new ObjectId(user.get('_id')),
+        email: user.get('email'),
+      }, jwtKey, jwtOptions);
+
+      // store user details in token
+      const token = new AccessToken({
+        userId: new ObjectId(user.get('_id')),
+        type: 'web',
+        raw: accessToken,
       });
-    }
 
-    // sending back a message if flow has succeeded
-    function successHandler(token) {
-      reply({
-        access_token: token.get('token'),
-      });
-    }
+      return token.save()
+        .then(() => [token, user]);
+    };
 
-    // every code references to a point in auth flow - look at next section below
-    function errorHandler(error) {
+    const saveTokenOnUser = (arr) => {
+      const token = arr[0];
+      const user = arr[1];
+
+      const tokens = user.get('accessTokens');
+
+      // TODO: remove same type of accesstokens
+
+      // get all tokens as array
+      // and after pushing new, save back
+      // hacky due to mongorito does not support modelbased push operations
+      tokens.push(token.get('_id'));
+      // save on user
+      user.set('accessTokens', tokens);
+
+      return user.save()
+        .then(() => token.get('raw'));
+    };
+
+    const successHandler = accessToken => reply({
+      accessToken,
+    });
+
+    const errorHandler = (error) => {
       switch (error.code) {
-      case 0: // there is no user with such email
-        reply.notFound('Email is not registered');
+      case 0:
+        reply.notFound();
         break;
       case 1:
-        reply.unauthorized('Wrong credentials');
+        reply.unauthorized();
         break;
       default:
-        // it we do not know or exception & log
-        // we do not check db errors
         reply.badImplementation(error);
       }
-    }
+    };
 
     User
-      .find({
+      .findOne({
         email,
       })
-      // get single user - case 0
-      .then(checkUserByEmail)
-      // check pw - case 1
+      .then(checkUser)
       .then(checkPassword)
-      // save tokens - case 2
-      .then(generateAccessToken)
-      // reply with token
+      .then(generateToken)
+      .then(saveTokenOnUser)
       .then(successHandler)
-      // check errorcode and reply with error
+      .catch(errorHandler);
+  },
+
+  loginFacebook(request, reply) {
+    const {
+      code,
+    } = request.payload;
+    const {
+      facebook,
+    } = request.server.app.config.mixed;
+
+    // trade explicit granted (see oauth 2 spec) code with accesstoken
+    // & refreshtoken
+    const graphUrl = 'https://graph.facebook.com/v2.8';
+    const oauthUrl = 'https://graph.facebook.com/v2.8/oauth/access_token';
+    // const debugUrl = 'https://graph.facebook.com/v2.8/debug_token';
+
+    // get user accesstoken
+    const getUserAccessToken = () =>
+      Axios.get(oauthUrl, {
+        params: {
+          client_id: facebook.appId,
+          redirect_uri: facebook.redirectUri,
+          client_secret: facebook.appSecret,
+          code,
+        },
+      })
+      .then(response => response.data.access_token);
+
+    // get app accesstoken
+    /*
+    const getAppAccessToken = () =>
+      Axios.get(oauthUrl, {
+        params: {
+          client_id: facebook.appId,
+          client_secret: facebook.appSecret,
+          grant_type: 'client_credentials',
+        },
+      })
+      .then(response => response.data);
+    */
+
+    // check for validation of useraccesstoken
+    /*
+    const getUserAccessTokenInfo = (tokens) => {
+      const userAccessToken = tokens[0].access_token;
+      const appAccessToken = tokens[1].access_token;
+
+      return Axios.get(debugUrl, {
+        params: {
+          input_token: userAccessToken,
+          access_token: appAccessToken,
+        },
+      })
+      .then(response => [userAccessToken, appAccessToken, response.data.data]); // data.data
+    };
+    */
+
+    const createOrUpdateUser = (accesstoken) => {
+      // get user data from facebook
+      const getUserDataFromFacebook = () =>
+        Axios.get(`${graphUrl}/me`, {
+          params: {
+            access_token: accesstoken,
+            fields: 'birthday,email,first_name,last_name,gender,picture{url}',
+          },
+        })
+        // send back fbuser & token
+        .then(response => [response.data, accesstoken]);
+
+      // get user data from db
+      const getUserDataFromDb = (args) => {
+        const fbUser = args[0];
+        const token = args[1];
+
+        return User
+          .or({
+            'social.facebook.userId': fbUser.id,
+          }, {
+            email: fbUser.email,
+          })
+          .findOne()
+          .then((user) => {
+            // check for match
+            // match - store new token / data
+            if (user) {
+              // set new token
+              user.set('social.facebook.userId', fbUser.id);
+              user.set('social.facebook.accessToken', token);
+
+              return user.save();
+            }
+            // store new user account
+            // TODO: move to model hooks
+            const newUser = new User({
+              firstName: fbUser.first_name,
+              lastName: fbUser.last_name,
+              email: fbUser.email,
+              gender: fbUser.gender,
+              avatar: fbUser.picture.data.url,
+              birthDate: new Date(fbUser.birthday), // fb
+              password: '',
+              // init
+              passwordToken: '',
+              accessTokens: [],
+              friends: [],
+              lastActivity: [],
+              social: {
+                facebook: {
+                  userId: fbUser.id,
+                  accessToken: token, // store token for late using,
+                },
+              },
+              favourited: '',
+              followed: [],
+              joined: [],
+              created: [],
+              earned: [],
+            });
+
+            return newUser.save();
+          });
+      };
+
+      return getUserDataFromFacebook()
+        .then(getUserDataFromDb);
+    };
+
+    const generateToken = (user) => {
+      const {
+        jwtKey,
+        jwtOptions,
+      } = request.server.app.config.mixed.security;
+      // jwt might fail when config is undefined yet i didn't set up a reject for it
+      // because then the server would fail to start
+      const accessToken = jwt.sign({
+        userId: user.get('_id'),
+        email: user.get('email'),
+      }, jwtKey, jwtOptions);
+
+      // store user details in token
+      const token = new AccessToken({
+        userId: user.get('_id'),
+        type: 'web',
+        raw: accessToken,
+      });
+
+      return token.save()
+        .then(() => [token, user]);
+    };
+
+    const saveTokenOnUser = (arr) => {
+      const token = arr[0];
+      const user = arr[1];
+
+      const tokens = user.get('accessTokens');
+
+      // TODO: remove same type of accesstokens
+
+      // get all tokens as array
+      // and after pushing new, save back
+      // hacky due to mongorito does not support modelbased push operations
+      tokens.push(token.get('_id'));
+      // save on user
+      user.set('accessTokens', tokens);
+
+      return user.save()
+        .then(() => token.get('raw'));
+    };
+
+    const successHandler = accessToken => reply({
+      accessToken,
+    });
+
+    const errorHandler = (error) => {
+      switch (error.code) {
+      case 0:
+        reply.unauthorized();
+        break;
+      default:
+        reply.badImplementation(error);
+      }
+    };
+
+    getUserAccessToken()
+      .then(createOrUpdateUser)
+      .then(generateToken)
+      .then(saveTokenOnUser)
+      .then(successHandler)
       .catch(errorHandler);
   },
 
   resetPassword(request, reply) {
     const email = request.payload.email;
-    const config = request.server.app.config;
+    const {
+      config,
+    } = request.server.app;
 
-    function checkUserByEmail(users) {
-      return new Promise((resolve, reject) =>
-        (users[0] ? resolve(users[0]) : reject({
+    const checkUser = (user) => {
+      if (!user) {
+        return Promise.reject({
           code: 0,
-          message: email,
-        })));
-    }
+        });
+      }
+      return Promise.resolve(user);
+    };
 
-    // generate a passwordtoken and save aswell
-    function generateAndSavePasswordToken(user) {
+    const generatePasswordToken = (user) => {
+      const chance = new Chance();
+      // TODO unique hash quarantee
+      const passwordToken = chance.hash();
+
+      user.set('passwordToken', passwordToken);
+
+      return user.save();
+    };
+
+    const sendEmail = (user) => {
+      const mailOptions = {
+        from: '"Mór Fit Run" <info@morfitrun.com>', // sender address
+        to: `${user.get('email')}`, // list of receiver
+        subject: `Recover your account, ${user.get('firstName')}!`, // Subject line
+        text: `Your password recovery token is: ${user.get('passwordToken')}`, // plaintext body
+      };
+
+      const transport = NodeMailer.createTransport(config.email);
+
       return new Promise((resolve, reject) => {
-        /* legacy
-        // store email in token to make sure token is unique
-        const passwordToken = jwt.sign({
-          user_id: user.get('_id'),
-          email: user.get('email'),
-        }, config.mixed.security.jwt_key, config.mixed.security.pt_jwt_options);
-        // from environment config
-        */
-        const chance = new Chance();
-        const passwordToken = chance.hash();
-
-        user.set('password_token', passwordToken);
-
-        user
-          .save()
-          .then((userWithToken) => resolve(userWithToken))
-          .catch((error) => reject({
-            code: 1,
-            message: error,
-          }));
-      });
-    }
-
-    function sendEmail(user) {
-      return new Promise((resolve, reject) => {
-        const mailOptions = {
-          from: '"Mór Fit Run" <info@morfitrun.com>', // sender address
-          to: `${user.get('email')}`, // list of receiver
-          subject: `Recover your account, ${user.get('first_name')}!`, // Subject line
-          text: `Your password recovery token is: ${user.get('password_token')}`, // plaintext body
-        };
-
-        const transport = NodeMailer.createTransport(config.email);
-
-        // send email and if error reject
         transport.sendMail(mailOptions, (error) => {
           if (error) {
-            reject({
-              error: 2,
-              message: error,
-            });
-          } else {
-            resolve();
+            return reject();
           }
+          return resolve();
         });
       });
-    }
+    };
 
     // sending back a message
-    function successHandler() {
-      reply();
-    }
+    const successHandler = () => reply();
 
-    // checking if error's coming from exception or data's side
-    function errorHandler(error) {
+    const errorHandler = (error) => {
       switch (error.code) {
       case 0:
         reply.notFound();
@@ -210,26 +367,24 @@ const UserController = {
       default:
         reply.badImplementation(error);
       }
-    }
+    };
 
     User
-      .find({
+      .findOne({
         email,
       })
-      // send back a single user (array comes from find) and reject if invalid email
-      .then(checkUserByEmail)
-      .then(generateAndSavePasswordToken) // generate save token
+      .then(checkUser)
+      .then(generatePasswordToken)
       .then(sendEmail)
       .then(successHandler) // if everything went well
       .catch(errorHandler); // if any error occured
   },
 
-  // TODO delete access tokens
   recoverPassword(request, reply) {
     // parameters
     const {
       password,
-      passwordToken
+      passwordToken,
     } = request.payload;
 
     // check if found user
@@ -242,79 +397,42 @@ const UserController = {
       return Promise.resolve(user);
     };
 
-    function setNewPassword(user) {
-      return new Promise((resolve, reject) => {
-        User.helpers
-          .generatePasswordHash(password)
-          .then((hash) => {
-            // store hashed password
-            user.set('password', hash);
+    const generatePasswordHash = user =>
+      User.helpers
+        .generatePasswordHash(password)
+        .then(hash => [hash, user]);
 
-            user
-              .save()
-              .then((userWithHash) => resolve(userWithHash))
-              .catch((error) => reject({
-                code: 1,
-                message: error,
-              }));
-          })
-          .catch((error) => reject({
-            code: 1,
-            message: error,
-          }));
-      });
-    }
+    const saveHash = (arr) => {
+      const hash = arr[0];
+      const user = arr[1];
 
-    // remove passwordtoken from user
-    function removePasswordToken(user) {
-      return new Promise((resolve, reject) => {
-        // remove pw token - "used"
-        user.set('password_token', '');
+      user.set('password', hash);
+      user.set('passwordToken', '');
 
-        user
-          .save()
-          .then((userWithoutToken) => resolve(userWithoutToken))
-          .catch((error) => reject({
-            code: 2,
-            message: error,
-          }));
-      });
-    }
+      return user.save();
+    };
 
-    // remove all accesstokens based on userid
-    function removeAccessTokens(user) {
-      return new Promise((resolve, reject) => {
-        // clear accesstokens collection
+    const removeAccessTokens = (user) => {
+      const fromAT = () =>
         AccessToken
           .remove({
-            user_id: user.get('_id'),
-          })
-          .then(() => resolve(user))
-          .catch((error) => reject({
-            code: 3,
-            message: error,
-          }));
+            userId: user.get('_id'),
+          });
 
-        // remove from user entity aswell
-        user.set('access_tokens', []); // set empty array - collection
+      const fromUser = () => {
+        user.set('accessTokens', []);
 
-        user
-          .save()
-          .then((userWithoutToken) => resolve(userWithoutToken))
-          .catch((error) => reject({
-            code: 3,
-            message: error,
-          }));
-      });
-    }
+        return user.save();
+      };
+
+      return Promise.all([fromAT, fromUser]);
+    };
 
     // sending back a message if flow has succeeded
-    function successHandler() {
-      reply();
-    }
+    const successHandler = () => reply();
 
     // checking if error's coming from exception or data's side
-    function errorHandler(error) {
+    const errorHandler = (error) => {
       switch (error.code) {
       case 0:
         reply.notFound();
@@ -322,128 +440,402 @@ const UserController = {
       default:
         reply.badImplementation(error);
       }
-    }
+    };
 
     User
       .findOne({
-        password_token: passwordToken,
+        passwordToken,
       })
       .then(checkUser)
-      .then(setNewPassword) // set new pw
-      .then(removePasswordToken) // remove password token
+      .then(generatePasswordHash) // set new pw
+      .then(saveHash) // remove password token
       .then(removeAccessTokens) // remove access tokens
       .then(successHandler) // reply success
       .catch(errorHandler); // fail
   },
 
-
   edit(request, reply) {
     // init default variables for pipeline work
-    const decodedToken = request.auth.credentials;
-    const fieldsToEdit = request.payload;
+    const {
+      userId,
+    } = request.auth.credentials;
+    const {
+      password,
+    } = request.payload;
 
-    // check if submitted data contains for password edit
-    // then hash
-    function checkIfPasswordToEdit(user) {
-      return new Promise((resolve, reject) => {
-        if (fieldsToEdit.password) {
-          User.helpers
-            // 0.0000000000001% chance is very much for bcrypt fail
-            // we do not care
-            .generatePasswordHash(fieldsToEdit.password)
-            .then((hash) => {
-              // set new password hash
-              user.set('password', hash);
-              resolve(user);
-            })
-            .catch((error) => {
-              reject({
-                code: 0,
-                message: error,
-              });
-            });
-        } else {
-          // there is no need to hash password
-          resolve(user);
+    const hashPassword = (user) => {
+      if (password) {
+        return User
+          .helpers
+          .generatePasswordHash(password)
+          .then((hash) => {
+            user.set('password', hash);
+            // set pw
+            return user;
+          });
+      }
+      return user;
+    };
+
+    const updateFields = user => new Promise((resolve) => {
+      _.forEach(request.payload, (value, field) => {
+        // we already took care of password field
+        // so we need to be sure we do not edit again
+        if (!(field === 'password')) {
+          user.set(field, value);
         }
       });
-    }
+      resolve(user);
+    });
 
-    // update user field one by one unless it's password
-    function updateFields(user) {
-      // update fields and send it
-      return new Promise((resolve) => {
-        _.forEach(fieldsToEdit, (value, field) => {
-          // we already took care of password field
-          // so we need to be sure we do not edit again
-          if (!(field === 'password')) {
-            user.set(field, value);
-          }
-        });
-        resolve(user);
-      });
-    }
-
-    // save edits on user model
-    function saveEdits(user) {
-      return new Promise((resolve, reject) => {
-        user
-          .save()
-          .then(() => {
-            resolve(user); // send back to successhandler
-          })
-          .catch((error) => {
-            reject({
-              code: 3,
-              message: error,
-            }); // send to errorhandler
-          });
-      });
-    }
+    const save = user => user.save();
 
     // send back a success
-    function successHandler() {
-      reply();
-    }
+    const successHandler = () => reply();
 
-    function errorHandler(error) {
+    const errorHandler = (error) => {
       switch (error.code) {
-      case 0:
-        reply.unauthorized('Invalid token'); // invalid token - points user we do not store
-        break;
       default:
-        reply.badImplementation(error); // we do not know we do not care - logger will handle
+        reply.badImplementation(error);
       }
-    }
+    };
 
     User
       .findOne({
-        _id: decodedToken.user_id,
+        _id: userId,
       })
-      .then(checkIfPasswordToEdit) // pw hashing
+      .then(hashPassword) // pw hashing
       .then(updateFields) // remaining fields
-      .then(saveEdits) // save them
+      .then(save) // save them
       .then(successHandler)
       .catch(errorHandler);
   },
 
   get(request, reply) {
     // init
-    const decodedToken = request.auth.credentials;
+    const {
+      userId: _id,
+    } = request.auth.credentials;
+
+    const checkUser = (user) => {
+      if (!user) {
+        return Promise.reject({
+          code: 0,
+        });
+      }
+      return Promise.resolve(user);
+    };
+
+    const successhandler = user => reply(user);
+
+    const errorHandler = (error) => {
+      switch (error.code) {
+      case 0:
+        reply.notFound();
+        break;
+      default:
+        reply.badImplementation(error);
+      }
+    };
+
+    const excludedProps = ['created_at', 'updated_at',
+      'accessTokens', 'password', 'passwordToken', 'social'];
 
     User
+      .exclude(excludedProps)
       .findOne({
-        _id: decodedToken.user_id,
+        _id,
       })
-      .then((user) => reply(user))
-      .catch((error) => reply.badImplementation(error));
+      .then(checkUser)
+      .then(successhandler)
+      .catch(errorHandler);
+  },
+
+  followRace(request, reply) {
+    const {
+      userId: _userId,
+    } = request.auth.credentials;
+
+    const {
+      raceId: _raceId,
+    } = request.payload;
+
+    const userId = new ObjectId(_userId);
+    const raceId = new ObjectId(_raceId);
+
+    const getUserAndRace = () =>
+      Promise.all([User.findOne({
+        _id: userId,
+      }), Race.findOne({
+        _id: raceId,
+      })]);
+
+    const checkRace = ([user, race]) => {
+      if (!race) {
+        return Promise.reject({
+          code: 0,
+        });
+      }
+      return Promise.resolve([user, race]);
+    };
+
+    const followRace = ([user, race]) => {
+      const followedRaces = user.get('followed');
+      const followersOfRace = race.get('followedBy');
+
+      // lodash find fails with empty array
+      if (!_.isEmpty(followedRaces) || !_.isEmpty(followersOfRace)) {
+        // search for userid, raceid in both collection
+        const checkRaceWithUser = _.find(followedRaces, raceid => raceid.equals(raceId));
+        const checkUserWithRace = _.find(followersOfRace, userid => userid.equals(userId));
+
+        // already follows
+        if (checkRaceWithUser || checkUserWithRace) {
+          return Promise.reject({
+            code: 1,
+          });
+        }
+      }
+
+      // add followed race to user
+      followedRaces.push(raceId);
+      user.set('followed', followedRaces);
+      // add to followers to race
+      followersOfRace.push(userId);
+      race.set('followedBy', followersOfRace);
+
+      return Promise.all([user.save(), race.save()]);
+    };
+
+    const successHandler = () => reply();
+
+    const errorHandler = (error) => {
+      switch (error.code) {
+      case 0:
+        // race not found
+        reply.notFound();
+        break;
+      case 1:
+        // already followed
+        reply.conflict();
+        break;
+      default:
+        reply.badImplementation(error);
+      }
+    };
+
+    getUserAndRace()
+      .then(checkRace)
+      .then(followRace)
+      .then(successHandler)
+      .catch(errorHandler);
+  },
+
+  unfollowRace(request, reply) {
+    const {
+      userId: _userId,
+    } = request.auth.credentials;
+
+    const {
+      raceId: _raceId,
+    } = request.payload;
+
+    const raceId = new ObjectId(_raceId);
+    const userId = new ObjectId(_userId);
+
+    // get user & race obj
+    const getUserAndRace = () =>
+      Promise.all([User.findOne({
+        _id: userId,
+      }), Race.findOne({
+        _id: raceId,
+      })]);
+
+    const checkRace = ([user, race]) => {
+      if (!race) {
+        return Promise.reject({
+          code: 0,
+        });
+      }
+      return Promise.resolve([user, race]);
+    };
+
+    const unfollow = ([user, race]) => {
+      // followed races from user & followers from race
+      const followedRaces = user.get('followed');
+      const followersOfRace = race.get('followedBy');
+
+      // equal check fails if empty so check
+      if (!_.isEmpty(followedRaces) || !_.isEmpty(followersOfRace)) {
+        // remove objectids (raceid, userid)
+        _.remove(followedRaces, raceid => raceid.equals(raceId));
+        _.remove(followersOfRace, userid => userid.equals(userId));
+      }
+
+      user.set('followed', followedRaces);
+      race.set('followedBy', followersOfRace);
+
+      return Promise
+        .all([race.save(), user.save()]);
+    };
+
+    const successHandler = () => reply();
+
+    const errorHandler = (error) => {
+      switch (error.code) {
+      case 0:
+        reply.notFound();
+        break;
+      default:
+        reply.badImplementation(error);
+      }
+    };
+
+    getUserAndRace()
+      .then(checkRace)
+      .then(unfollow)
+      .then(successHandler)
+      .catch(errorHandler);
+  },
+
+  favouriteRace(request, reply) {
+    const {
+      userId: _userId,
+    } = request.auth.credentials;
+
+    const {
+      raceId: _raceId,
+    } = request.payload;
+
+    const userId = new ObjectId(_userId);
+    const raceId = new ObjectId(_raceId);
+
+    const getUserAndRace = () =>
+      Promise.all([User.findOne({
+        _id: userId,
+      }), Race.findOne({
+        _id: raceId,
+      })]);
+
+    const checkRace = ([user, race]) => {
+      if (!race) {
+        return Promise.reject({
+          code: 0,
+        });
+      }
+      return Promise.resolve([user, race]);
+    };
+
+    const favourite = ([user, race]) => {
+      const usersFavourited = race.get('favouritedBy');
+
+      // TODO check not remove
+      if (!_.isEmpty(usersFavourited)) {
+        _.remove(usersFavourited, userid => userid.equals(userId));
+      }
+
+      user.set('favourited', raceId);
+
+      usersFavourited.push(userId);
+      race.set('favouritedBy', usersFavourited);
+
+      return Promise.all([user.save(), race.save()]);
+    };
+
+    const successHandler = () => reply();
+
+    const errorHandler = (error) => {
+      switch (error.code) {
+      case 0:
+        // race not found
+        reply.notFound();
+        break;
+      case 1:
+        // already followed
+        reply.conflict();
+        break;
+      default:
+        reply.badImplementation(error);
+      }
+    };
+
+    getUserAndRace()
+      .then(checkRace)
+      .then(favourite)
+      .then(successHandler)
+      .catch(errorHandler);
+  },
+
+  unfavouriteRace(request, reply) {
+    const {
+      userId: _userId,
+    } = request.auth.credentials;
+
+    const {
+      raceId: _raceId,
+    } = request.payload;
+
+    const raceId = new ObjectId(_raceId);
+    const userId = new ObjectId(_userId);
+
+    // get user & race obj
+    const getUserAndRace = () =>
+      Promise.all([User.findOne({
+        _id: userId,
+      }), Race.findOne({
+        _id: raceId,
+      })]);
+
+    const checkRace = ([user, race]) => {
+      if (!race) {
+        return Promise.reject({
+          code: 0,
+        });
+      }
+      return Promise.resolve([user, race]);
+    };
+
+    const unFavourite = ([user, race]) => {
+      const usersFavourited = race.get('favouritedBy');
+
+      // TODO check not remove
+      if (!_.isEmpty(usersFavourited)) {
+        _.remove(usersFavourited, userid => userid.equals(userId));
+      }
+
+      user.set('favourited', '');
+      race.set('favouritedBy', usersFavourited);
+
+      return Promise.all([race.save(), user.save()]);
+    };
+
+    const successHandler = () => reply();
+
+    const errorHandler = (error) => {
+      switch (error.code) {
+      case 0:
+        reply.notFound();
+        break;
+      default:
+        reply.badImplementation(error);
+      }
+    };
+
+    getUserAndRace()
+      .then(checkRace)
+      .then(unFavourite)
+      .then(successHandler)
+      .catch(errorHandler);
   },
 
   uploadAvatar(request, reply) {
     // init
     const payload = request.payload;
     const config = request.server.app.config;
-    const decodedToken = request.auth.credentials;
+    const {
+      userId: _id,
+    } = request.auth.credentials;
+
     const chance = new Chance();
 
     const uploadAvatar = new Promise((resolve, reject) => {
@@ -457,114 +849,141 @@ const UserController = {
       const file = fs.createWriteStream(path);
 
       // set event handler on error
-      file.on('error', (error) => reject(error));
+      file.on('error', error => reject(error));
 
-      // save
+      // piping stream
       payload.avatar.pipe(file);
       // set event handler on ending
       payload.avatar.on('end', (error) => {
         if (error) return reject(error);
-        // pass filepath
+        // pass filename
         return resolve(`${newFileName}_${payload.avatar.hapi.filename}`);
       });
     });
 
-    // set uploaded avatar filename on avatar field and remove before one
-    function updateAvatarOnUser(filename) {
-      return new Promise((resolve, reject) => {
-        User
-          .findOne({
-            _id: decodedToken.user_id,
-          })
-          // remove
-          /*
-          .then((user) => {
-            fs
-              .unlink(Path.join(__dirname,
-              `${config.folders.uploads}/${user.get('avatar')}`), (error) => {
-                console.log(error);
-              });
-          })
-          */
-          .then((user) => {
-            user.set('avatar', filename);
-            // save
-            user.save();
-            return resolve();
-          })
-          .catch((error) => reject(error));
-      });
-    }
+    const updateAvatarOnUser = filename =>
+      User
+        .findOne({
+          _id,
+        })
+        .then((user) => {
+          user.set('avatar', filename);
+          return user.save();
+        });
+
+    const successHandler = () => reply();
+
+    const errorHandler = (error) => {
+      switch (error.code) {
+      default:
+        reply.badImplementation(error);
+      }
+    };
 
     uploadAvatar
       .then(updateAvatarOnUser)
-      .then(() => reply())
-      .catch((error) => reply.badImplementation(error));
+      .then(successHandler)
+      .catch(errorHandler);
   },
 
   getFriends(request, reply) {
     // init
-    const decodedToken = request.auth.credentials;
+    const {
+      userId: _id,
+    } = request.auth.credentials;
+
+    const successHandler = (user) => {
+      // if empty, send back an empty array
+      return reply(user.get('friends'));
+    };
+
+    const errorHandler = (error) => {
+      switch (error.code) {
+      default:
+        reply.badImplementation(error);
+      }
+    };
+
+    const excludedProps = ['created_at', 'updated_at',
+      'accessTokens', 'password', 'passwordToken', 'social', 'email'];
 
     User
-      .populate('friends', User)
+      .populate('friends', User.exclude(excludedProps))
       .findOne({
-        _id: decodedToken.user_id,
+        _id,
       })
-      .then((user) => {
-        const userFriends = user.get('friends');
-
-        return reply(userFriends);
-      })
-      .catch((error) => reply.badImplementation(error));
+      .then(successHandler)
+      .catch(errorHandler);
   },
 
   addFriend(request, reply) {
+    // todo check for added id validate
     // param
-    const decodedToken = request.auth.credentials;
+    const {
+      userId: _id,
+    } = request.auth.credentials;
     const payload = request.payload;
+
+    const addFriend = (user) => {
+      const friends = user.get('friends');
+
+      friends.push(new ObjectId(payload[0]));
+
+      user.set('friends', friends);
+      return user.save();
+    };
+
+    const successHandler = () => reply();
+
+    const errorHandler = (error) => {
+      switch (error.code) {
+      default:
+        reply.badImplementation(error);
+      }
+    };
 
     User
       .findOne({
-        _id: decodedToken.user_id,
+        _id,
       })
-      .then((user) => {
-        const friends = user.get('friends');
-        // save convert string to objectid
-        friends.push(new ObjectId(payload[0]));
-
-        user.set('friends', friends);
-        user.save();
-
-        // TODO: check if already user & if submitted id is user
-
-        return reply();
-      })
-      .catch((error) => reply.badImplementation(error));
+      .then(addFriend)
+      .then(successHandler)
+      .catch(errorHandler);
   },
 
   removeFriend(request, reply) {
     // param
-    const decodedToken = request.auth.credentials;
+    const {
+      userId: _id,
+    } = request.auth.credentials;
     const userId = request.params.userId;
+
+    const removeFriends = (user) => {
+      const friends = user.get('friends');
+
+      const removedFriends = _.remove(friends, obj => obj === userId);
+
+      user.set('friends', removedFriends);
+
+      return user.save();
+    };
+
+    const successHandler = () => reply();
+
+    const errorHandler = (error) => {
+      switch (error.code) {
+      default:
+        reply.badImplementation(error);
+      }
+    };
 
     User
       .findOne({
-        _id: decodedToken.user_id,
+        _id,
       })
-      .then((user) => {
-        const friends = user.get('friends');
-
-        // check if user stored
-        const removedFriends = _.remove(friends, (obj) => obj === userId);
-
-        user.set('friends', removedFriends);
-
-        user.save();
-
-        return reply();
-      })
-      .catch((error) => reply.badImplementation(error));
+      .then(removeFriends)
+      .then(successHandler)
+      .catch(errorHandler);
   },
 
 };

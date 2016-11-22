@@ -8,23 +8,29 @@ import Race from '~/models/race-model';
 
 const RacesController = {
   get(request, reply) {
+    const excludedProps = ['created_at', 'updated_at',
+      'accessTokens', 'password', 'passwordToken', 'social'];
+
     Race
-      .populate('runs', Run)
-      .exclude(['created_at', 'updated_at'])
+      .exclude(excludedProps)
       .find()
-      .then((races) => reply(races))
-      .catch((error) => reply.badImplementation(error));
+      .then(races => reply(races))
+      .catch(error => reply.badImplementation(error));
   },
 
   create(request, reply) {
     const {
-      user_id,
+      userId: _id,
     } = request.auth.credentials;
     const newRace = request.payload;
 
-    newRace.created_by = new ObjectId(user_id);
+    newRace.createdBy = new ObjectId(_id);
+    // init fields
     newRace.runs = [];
     newRace.logo = '';
+    newRace.followedBy = [];
+    newRace.favouritedBy = [];
+    newRace.joinedBy = [];
 
     const race = new Race(newRace);
 
@@ -36,7 +42,7 @@ const RacesController = {
 
   getById(request, reply) {
     const {
-      raceId,
+      raceId: _id,
     } = request.params;
 
     const checkRace = (race) => {
@@ -48,7 +54,7 @@ const RacesController = {
       return Promise.resolve(race);
     };
 
-    const successHandler = (race) => reply(race);
+    const successHandler = race => reply(race);
 
     const errorHandler = (error) => {
       switch (error.code) {
@@ -63,7 +69,7 @@ const RacesController = {
     Race
       .exclude(['created_at', 'updated_at'])
       .findOne({
-        _id: raceId,
+        _id,
       })
       .then(checkRace)
       .then(successHandler)
@@ -73,14 +79,18 @@ const RacesController = {
   // TODO clear / validate
   editById(request, reply) {
     const {
-      raceId,
+      raceId: _id,
     } = request.params;
 
-    const fieldsToEdit = request.payload;
+    const fields = request.payload;
 
     const checkRaceId = (race) => {
-      if (!race) return Promise.reject();
-      return race;
+      if (!race) {
+        return Promise.reject({
+          code: 0,
+        });
+      }
+      return Promise.resolve(race);
     };
 
     const parseFields = (race) => {
@@ -92,26 +102,62 @@ const RacesController = {
       return reply();
     };
 
+    const errorHandler = (error) => {
+      switch (error.code) {
+      case 0:
+        reply.notFound();
+        break;
+      default:
+        reply.badImplementation(error);
+      }
+    };
+
     Race
       .findOne({
-        _id: raceId,
+        _id,
       })
       .then(checkRaceId)
       .then(parseFields)
       .then(successHandler)
-      .catch((error) => reply.badImplementation(error));
+      .catch(errorHandler);
   },
 
   getRuns(request, reply) {
-    const raceId = new ObjectId(request.params.raceId);
+    const {
+      raceId: _id,
+    } = request.params;
+
+    const checkRace = (race) => {
+      if (!race) {
+        return Promise.reject({
+          code: 0,
+        });
+      }
+      return Promise.resolve(race.get('runs'));
+    };
+
+    const successHandler = runs => reply(runs);
+
+    const errorHandler = (error) => {
+      switch (error.code) {
+      case 0:
+        reply.notFound();
+        break;
+      default:
+        reply.badImplementation(error);
+      }
+    };
+
+    const excludedProps = ['created_at', 'updated_at'];
 
     Race
-      .populate('runs', Run)
+      .populate('runs', Run.exclude(excludedProps))
       .findOne({
-        _id: raceId,
+        _id,
       })
-      .then((race) => reply(race.get('runs')))
-      .catch((error) => reply(error));
+      .then(checkRace)
+      .then(successHandler)
+      .catch(errorHandler);
   },
 
 };

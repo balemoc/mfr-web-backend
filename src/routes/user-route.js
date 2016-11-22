@@ -20,6 +20,18 @@ const userRoute = [
     },
   },
   {
+    path: '/v1/user/facebook',
+    method: 'POST',
+    handler: UserController.loginFacebook,
+    config: {
+      validate: {
+        payload: joi.object().keys({
+          code: joi.string().required(),
+        }),
+      },
+    },
+  },
+  {
     path: '/v1/user/reset_password',
     method: 'POST',
     handler: UserController.resetPassword,
@@ -53,10 +65,11 @@ const userRoute = [
       auth: 'access_token',
       validate: {
         payload: joi.object().keys({
-          first_name: joi.string().optional().min(3),
-          last_name: joi.string().optional().min(3),
+          firstName: joi.string().optional().min(3),
+          lastName: joi.string().optional().min(3),
+          password: joi.string().optional(),
           email: joi.string().optional(),
-          birth_date: joi.date().optional().format('D/M/YYYY'),
+          birthDate: joi.date().optional(),
         }),
       },
     },
@@ -80,7 +93,7 @@ const userRoute = [
   },
   {
     path: '/v1/user/friends',
-    method: 'PUT',
+    method: 'POST',
     handler: UserController.addFriend,
     config: {
       auth: 'access_token',
@@ -99,11 +112,62 @@ const userRoute = [
         params: {
           userId: joi.objectId().required(),
         },
-        payload: joi.array().length(1).items(joi.objectId()),
       },
     },
   },
-  /* AVATAR */
+  /* RACES */
+  {
+    path: '/v1/user/follow',
+    method: 'POST',
+    handler: UserController.followRace,
+    config: {
+      auth: 'access_token',
+      validate: {
+        payload: {
+          raceId: joi.objectId().required(),
+        },
+      },
+    },
+  },
+  {
+    path: '/v1/user/follow',
+    method: 'DELETE',
+    handler: UserController.unfollowRace,
+    config: {
+      auth: 'access_token',
+      validate: {
+        payload: {
+          raceId: joi.objectId().required(),
+        },
+      },
+    },
+  },
+  {
+    path: '/v1/user/favourite',
+    method: 'POST',
+    handler: UserController.favouriteRace,
+    config: {
+      auth: 'access_token',
+      validate: {
+        payload: {
+          raceId: joi.objectId().required(),
+        },
+      },
+    },
+  },
+  {
+    path: '/v1/user/favourite',
+    method: 'DELETE',
+    handler: UserController.unfavouriteRace,
+    config: {
+      auth: 'access_token',
+      validate: {
+        payload: {
+          raceId: joi.objectId().required(),
+        },
+      },
+    },
+  },
   {
     // TODO validate image
     path: '/v1/user/avatar',

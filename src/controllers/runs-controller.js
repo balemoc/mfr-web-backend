@@ -15,15 +15,25 @@ const RunsController = {
   */
   get(request, reply) {
     // filter
-    const raceId = request.query.race_id;
+    const {
+      raceId,
+    } = request.query;
 
     const query = {};
 
-    if (raceId) query.race_id = raceId;
+    if (raceId) query.raceId = raceId;
 
-    const successHandler = (runs) => reply(runs);
+    const successHandler = runs => reply(runs);
 
-    const errorHandler = (error) => reply.badImplementation(error);
+    const errorHandler = (error) => {
+      switch (error.code) {
+      case 0:
+        reply.notFound();
+        break;
+      default:
+        reply.badImplementation(error);
+      }
+    };
 
     Run
       .exclude(['created_at', 'updated_at'])
@@ -34,13 +44,13 @@ const RunsController = {
 
   create(request, reply) {
     const {
-      race_id,
-      date,
+      raceId: _raceId,
+      date: _date,
     } = request.payload;
 
     // parse input data
-    const raceId = new ObjectId(race_id);
-    const runDate = moment(new Date(date)).toDate();
+    const raceId = new ObjectId(_raceId);
+    const date = moment(new Date(_date)).toDate();
 
     // check for race
     const checkRace = (race) => {
@@ -52,37 +62,39 @@ const RunsController = {
       return Promise.resolve(race);
     };
 
-    const createAndSaveRun = () => {
-      const run = new Run(
-        {
-          race_id: raceId,
-          date: runDate,
-          runners: [],
-          results: [],
-        });
-
-      run.save();
-
-      return Promise.resolve(run);
+    const newRun = {
+      raceId,
+      date,
     };
 
-    const saveOnRace = (run) => {
+    // def fields
+    newRun.runners = [];
+    newRun.results = [];
+
+    const createAndSaveRun = () => {
+      const run = new Run(newRun);
+
+      return run.save();
+    };
+
+    const saveOnRace = run =>
       Race
         .findOne({
           _id: raceId,
         })
         .then((race) => {
           const runs = race.get('runs');
+          const runId = run.get('_id');
 
-          runs.push(run.get('_id'));
-
+          // push runid to race runs
+          runs.push(runId);
           race.set('runs', runs);
 
-          race.save();
+          return race.save();
         });
-    };
 
     const successHandler = () => reply();
+
     const errorHandler = (error) => {
       switch (error.code) {
       case 0:
@@ -105,7 +117,9 @@ const RunsController = {
   },
 
   getById(request, reply) {
-    const runId = new ObjectId(request.params.runId);
+    const {
+      runId,
+    } = request.params;
 
     const successHandler = (run) => {
       if (!run) {
@@ -137,25 +151,57 @@ const RunsController = {
 
   /* RUNNERS */
   getRunners(request, reply) {
-    const runId = request.params.runId;
+    const {
+      runId,
+    } = request.params;
+
+    const checkRun = (run) => {
+      if (!run) {
+        return Promise.reject({
+          code: 0,
+        });
+      }
+      return Promise.resolve(run);
+    };
+
+    const successHandler = run => reply(run.get('runners'));
+
+    const errorHandler = (error) => {
+      switch (error.code) {
+      case 0:
+        reply.notFound();
+        break;
+      default:
+        reply.badImplementation(error);
+      }
+    };
 
     Run
       .findOne({
         _id: runId,
       })
-      .then((run) => reply(run.get('runners') || []))
-      .catch((error) => reply.badImplementation(error));
+      .then(checkRun)
+      .then(successHandler)
+      .catch(errorHandler);
   },
 
   addRunner(request, reply) {
     // userid convert to ObjectId
-    const userId = new ObjectId(request.auth.credentials.user_id);
+    const {
+      userId: _userId,
+    } = request.auth.credentials;
+    const userId = new ObjectId(_userId);
+
     // runid convert to ObjectId
-    const runId = new ObjectId(request.params.runId);
+    const {
+      runId: _runId,
+    } = request.params;
+    const runId = new ObjectId(_runId);
+
     // set up new runner
     const newRunner = {
-      user_id: userId,
-      date_of_join: moment().toDate(), // date now
+      userId,
+      dateOfJoin: moment().toDate(), // date now
     };
 
     const checkRun = (run) => {
@@ -168,10 +214,10 @@ const RunsController = {
     };
 
     const checkRunner = (run) => {
-      // get runners and if undefined, set new array
+      // get runners
       const runners = run.get('runners');
       // check if user already submitted
-      const isMatch = _.find(runners, ['user_id', userId]);
+      const isMatch = _.find(runners, ['userId', userId]);
 
       // reject
       if (isMatch) {
@@ -189,7 +235,8 @@ const RunsController = {
       if (_.isEmpty(runners)) {
         // set init bib
         newRunner.bib = 1;
-      } else { // calculate bib
+      } else {
+        // calculate bib
         // get runner with highest bib
         const runnerWithHighestBib = _(runners).sortBy('bib').last();
         // set + 1
@@ -200,8 +247,23 @@ const RunsController = {
       // set with new runners
       run.set('runners', runners);
 
-      run.save();
+      return run.save();
     };
+
+    const addJoinedRun = run =>
+      User
+        .findOne({
+          _id: userId,
+        })
+        .then((user) => {
+          const joinedRuns = user.get('joined');
+
+          joinedRuns.push(run.get('_id'));
+
+          user.set('joined', joinedRuns);
+
+          return user.save();
+        });
 
     const successHandler = () => reply();
 
@@ -225,15 +287,22 @@ const RunsController = {
       .then(checkRun)
       .then(checkRunner)
       .then(addRunner)
+      .then(addJoinedRun)
       .then(successHandler)
       .catch(errorHandler);
   },
 
   deleteRunner(request, reply) {
     // get userId
-    const userId = new ObjectId(request.auth.credentials.user_id);
+    const {
+      userId,
+    } = request.auth.credentials;
     // get runId
-    const runId = new ObjectId(request.params.runId);
+    const {
+      runId: _runId,
+    } = request.params;
+
+    const runId = new ObjectId(_runId);
 
     const checkRun = (run) => {
       if (!run) {
@@ -247,33 +316,36 @@ const RunsController = {
     const deleteRunner = (run) => {
       // get runners from run
       const runners = run.get('runners') || [];
-      // search for user
-      const matchIndex = _.findIndex(runners, ['user_id', userId]);
-      // set new array for runners
-      let newRunners = null;
 
-      if (matchIndex !== -1) { // watchout for === 0 check
-        // remove user from it
-        newRunners = _.remove(runners, (runner) => runner.user_id === userId);
-        // store new array of runners
-        run.set('runners', newRunners);
-        run.save();
+      // remove user from it
+      _.remove(runners, runner => runner.userId.equals(userId));
+      // store new array of runners
+      run.set('runners', runners);
 
-        return Promise.resolve();
-      }
-      return Promise.reject({
-        code: 1,
-      });
+      return run.save();
     };
 
+    const deleteJoinedRun = run =>
+      User
+        .findOne({
+          _id: userId,
+        })
+        .then((user) => {
+          const joinedRuns = user.get('joined');
+
+          _.remove(joinedRuns, runid => runid.equals(run.get('_id')));
+
+          user.set('joined', joinedRuns);
+
+          return user.save();
+        });
+
     const successHandler = () => reply();
+
     const errorHandler = (error) => {
       switch (error.code) {
       case 0:
-        reply.notFound('Run');
-        break;
-      case 1:
-        reply.notFound('Runner');
+        reply.notFound();
         break;
       default:
         reply.badImplementation(error);
@@ -286,6 +358,7 @@ const RunsController = {
       })
       .then(checkRun)
       .then(deleteRunner)
+      .then(deleteJoinedRun)
       .then(successHandler)
       .catch(errorHandler);
   },
@@ -328,62 +401,68 @@ const RunsController = {
   },
 
   addResult(request, reply) {
-    // userid convert to ObjectId
-    const userId = new ObjectId(request.payload.user_id);
-    // runid convert to ObjectId
-    const runId = new ObjectId(request.params.runId);
-    // time
+    // convert userid to objectid
     const {
-      minutes,
-      seconds,
-      milliseconds,
-    } = request.payload.time;
+      userId: _userId,
+      time: {
+        minutes,
+        seconds,
+        milliseconds,
+      },
+    } = request.payload;
 
+    const userId = new ObjectId(_userId);
+
+    // runid convert to ObjectId
+    const {
+      runId: _runId,
+    } = request.params;
+
+    const runId = new ObjectId(_runId);
+
+    // run durations
     const duration = moment.duration({
       minutes,
       seconds,
       milliseconds,
     });
 
+    // todo split get data
     // find user
-    const checkUser = new Promise((resolve, reject) => {
+    const checkUser = () =>
       User
         .findOne({
           _id: userId,
         })
         .then((user) => {
           if (!user) {
-            return reject({
+            return Promise.reject({
               code: 0,
             });
           }
-          return resolve(user);
+          return Promise.resolve(user);
         });
-    });
 
-    // find race
-    const checkRun = new Promise((resolve, reject) => {
+    // find run
+    const checkRun = () =>
       Run
         .findOne({
           _id: runId,
         })
         .then((run) => {
           if (!run) {
-            return reject({
+            return Promise.reject({
               code: 1,
             });
           }
-          return resolve(run);
+          return Promise.resolve(run);
         });
-    });
 
-    const checkResult = (values) => {
+    const checkResult = ([user, run]) => {
       // parse incoming values
-      const user = values[0];
-      const run = values[1];
       const results = run.get('results');
       // check if user already submitted
-      const isMatch = _.find(results, ['user_id', user.get('_id')]);
+      const isMatch = _.find(results, ['userId', user.get('_id')]);
 
       // already submitted result
       if (isMatch) {
@@ -393,17 +472,19 @@ const RunsController = {
       }
 
       results.push({
-        user_id: user.get('_id'),
+        userId: user.get('_id'),
         time: duration.toJSON(),
       });
 
       run.set('results', results);
+
       run.save();
 
       return Promise.resolve();
     };
 
     const successHandler = () => reply();
+
     const errorHandler = (error) => {
       switch (error.code) {
       case 0:
@@ -421,7 +502,7 @@ const RunsController = {
     };
 
     Promise
-      .all([checkUser, checkRun])
+      .all([checkUser(), checkRun()])
       .then(checkResult)
       .then(successHandler)
       .catch(errorHandler);

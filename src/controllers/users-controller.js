@@ -5,129 +5,128 @@ import User from '~/models/user-model';
 
 const UsersController = {
   create(request, reply) {
-    // parsed new user data
-    const newUser = request.payload;
-    newUser.birth_date = moment(newUser.birth_date).toDate(); // convert json date to js date
-    newUser.access_tokens = [];
-    newUser.password_token = '';
-    newUser.avatar = '';
-    newUser.gender = _.lowerCase(request.payload.gender);
+    // get params
+    const {
+      firstName,
+      lastName,
+      email,
+      password,
+      birthDate: _birthDate,
+      gender,
+    } = request.payload;
 
-    function checkUserByEmail(users) {
-      return new Promise((resolve, reject) =>
-        (_.isEmpty(users) ? resolve() : reject({
-          code: 0, // if there is an user registered with this email
-          message: users[0], // pass user to errorhandler
-        })));
-    }
+    const birthDate = moment(_birthDate).toDate(); // convert to json date
+    // initialize empty fields
+    const passwordToken = '';
+    const accessTokens = [];
+    const avatar = '';
+    const friends = [];
+    const lastActivity = moment().toDate();
+    const social = {};
+    const favourited = '';
+    const follows = [];
+    const joined =  [];
+    const created = [];
+    const earned = [];
 
-    function createNewUser() {
-      return new Promise((resolve, reject) => {
-        const user = new User(newUser);
-        // create new user with passed variables
-        user
-          .save()
-          .then((createdUser) => resolve(createdUser)) // pass created user
-          .catch((error) => reject({
-            code: 1,
-            message: error,
-          }));
+    const checkUser = (user) => {
+      if (user) {
+        return Promise.reject({
+          code: 0,
+        });
+      }
+      return Promise.resolve();
+    };
+
+    const createUser = () => {
+      const user = new User({
+        firstName,
+        lastName,
+        email,
+        password,
+        birthDate,
+        gender,
+        // init
+        passwordToken,
+        accessTokens,
+        avatar,
+        friends,
+        lastActivity,
+        social,
+        favourited,
+        follows,
+        joined,
+        created,
+        earned,
       });
-    }
+      return user.save();
+    };
 
-    function hashPasswordAndSave(userWithoutHash) {
-      return new Promise((resolve, reject) => {
-        User.helpers
-          // switch user's password with a hashed one
-          .generatePasswordHash(userWithoutHash.get('password'))
-          .then((hash) => {
-            userWithoutHash.set('password', hash);
-
-            userWithoutHash
-              .save()
-              .then((user) => resolve(user)) // passing hashed user
-              .catch((error) => reject({
-                code: 2,
-                message: error,
-              }));
-          })
-          .catch((error) => reject({
-            code: 2,
-            message: error,
-          }));
+    const hashPassword = user => User
+      .helpers.generatePasswordHash(user.get('password'))
+      .then((hash) => {
+        // set hash on field
+        user.set('password', hash);
+        return user.save();
       });
-    }
 
-    // sending back a 200 http status code
-    function successHandler() {
-      reply();
-    }
+    const successHandler = () => reply();
 
-    // checking if error's coming from exception or data's side
-    function errorHandler(error) {
+    const errorHandler = (error) => {
       switch (error.code) {
       case 0:
         reply.conflict();
         break;
       default:
-        // it we do not know or exception & log
         reply.badImplementation(error);
       }
-    }
+    };
 
     User
-      .find({
-        email: newUser.email,
+      .findOne({
+        email,
       })
-      // check if there is no user registered with such email
-      .then(checkUserByEmail) // error code - 0
-      .then(createNewUser) // error code - 1 etc
-      .then(hashPasswordAndSave) // hash and save pw on model
-      .then(successHandler) // if success
-      .catch(errorHandler); // if fail
+      .then(checkUser)
+      .then(createUser)
+      .then(hashPassword)
+      .then(successHandler)
+      .catch(errorHandler);
   },
 
   getById(request, reply) {
-    const userId = request.params.user_id;
+    // params
+    const {
+      id,
+    } = request.params;
 
-    function checkUserByEmail(users) {
-      return new Promise((resolve, reject) =>
-        (_.isEmpty(users) ? reject({
+    const checkUser = (user) => {
+      if (!user) {
+        return Promise.reject({
           code: 0,
-          message: userId,
-        }) : resolve(users[0]))); // pass user if otherwise userid if absent
-    }
+        });
+      }
+      return Promise.resolve(user);
+    };
 
-    // sending back a message
-    function successHandler(user) {
-      reply({
-        avatar: user.get('avatar') || '', // if not set
-        first_name: user.get('first_name'),
-        last_name: user.get('last_name'),
-        gender: user.get('gender'),
-        birth_date: user.get('birth_date'),
-      });
-    }
+    const successHandler = user => reply(user);
 
-    // checking if error's coming from exception or data's side
-    function errorHandler(error) {
-      // check errorcode
+    const errorHandler = (error) => {
       switch (error.code) {
       case 0:
-        reply.notFound('There is no user with this ID');
+        reply.notFound();
         break;
       default:
-        // log error
         reply.badImplementation(error);
       }
-    }
+    };
+
+    const excludedProps = ['created_at', 'updated_at',
+      'accessTokens', 'password', 'passwordToken', 'social', 'email'];
 
     User
-      .find({
-        _id: userId,
-      })
-      // check if there is no user registered with such email
-      .then(checkUserByEmail)
+      .exclude(excludedProps)
+      .findById(id)
+      .then(checkUser)
       .then(successHandler)
       .catch(errorHandler);
   },
@@ -138,33 +137,30 @@ const UsersController = {
       // age,
       gender,
     } = request.query;
+
     // query obj
     const query = {};
 
     // TODO AGE
-    // buiilding query obj
-    if (gender) query.gender = _.lowerCase(gender);
+    if (gender) query.gender = gender;
+
+    const successHandler = users => reply(users);
+
+    const errorHandler = (error) => {
+      switch (error.code) {
+      default:
+        reply.badImplementation(error);
+      }
+    };
+
+    const excludedProps = ['created_at', 'updated_at',
+      'accessTokens', 'password', 'passwordToken', 'social', 'email'];
 
     User
-      .find(query)
-      .then((users) => {
-        // strip properties to reply
-        const stripedUsers = [];
-
-        _.forEach(users, (obj) => {
-          stripedUsers.push({
-            user_id: obj.get('_id'),
-            first_name: obj.get('first_name'),
-            last_name: obj.get('last_name'),
-            birth_date: obj.get('birth_date'),
-            gender: obj.get('gender'),
-            avatar: obj.get('avatar'),
-          });
-        });
-
-        return reply(stripedUsers);
-      })
-      .catch((error) => reply(error));
+      .exclude(excludedProps)
+      .find()
+      .then(successHandler)
+      .catch(errorHandler);
   },
 };
 
